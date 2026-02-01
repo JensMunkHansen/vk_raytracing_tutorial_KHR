@@ -19,3 +19,5 @@ samples/.vscode/
 
 _bin/
 
+*~
+resources/VertexColorLowerJawScan.ply
