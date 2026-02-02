@@ -282,14 +282,6 @@ public:
         .sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Scene data buffer address
         .metallicRoughnessOverride = m_metallicRoughnessOverride,  // Material property overrides
     };
-    const VkPushConstantsInfo pushInfo{
-        .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-        .layout     = m_graphicPipelineLayout,
-        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-        .offset     = 0,
-        .size       = sizeof(shaderio::TutoPushConstant),
-        .pValues    = &pushValues,  // Other values are passed later
-    };
 
     // Render the sky background if enabled
     if(m_sceneResource.sceneInfo.useSky)
@@ -339,13 +331,8 @@ public:
                                       {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}});
 
     // Bind the descriptor sets for the graphics pipeline (making textures and buffers available to shaders)
-    const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{.sType      = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-                                                          .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-                                                          .layout     = m_graphicPipelineLayout,
-                                                          .firstSet   = 0,
-                                                          .descriptorSetCount = 1,
-                                                          .pDescriptorSets    = m_descPack.getSetPtr()};
-    vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicPipelineLayout, 0, 1,
+                            m_descPack.getSetPtr(), 0, nullptr);
 
 
     // ** BEGIN RENDERING **
@@ -376,7 +363,8 @@ public:
       // Update push constants for this instance
       pushValues.normalMatrix  = glm::transpose(glm::inverse(glm::mat3(m_sceneResource.instances[i].transform)));
       pushValues.instanceIndex = int(i);  // Instance index for shader access
-      vkCmdPushConstants2(cmd, &pushInfo);
+      vkCmdPushConstants(cmd, m_graphicPipelineLayout, VK_SHADER_STAGE_ALL_GRAPHICS, 0,
+                         sizeof(shaderio::TutoPushConstant), &pushValues);
 
       // Get the buffer using the pre-computed mesh-to-buffer mapping
       uint32_t            bufferIndex = m_sceneResource.meshToBufferIndex[meshIndex];
@@ -494,13 +482,8 @@ public:
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
     // Bind the descriptor sets for the compute pipeline (making textures and buffers available to shaders)
-    const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{.sType      = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-                                                          .stageFlags = VK_SHADER_STAGE_ALL,
-                                                          .layout     = m_rtPipelineLayout,
-                                                          .firstSet   = 0,
-                                                          .descriptorSetCount = 1,
-                                                          .pDescriptorSets    = m_descPack.getSetPtr()};
-    vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_rtPipelineLayout, 0, 1,
+                            m_descPack.getSetPtr(), 0, nullptr);
 
     // Push descriptor sets for ray tracing resources
     nvvk::WriteSetContainer write{};
@@ -520,12 +503,8 @@ public:
     if(m_enableRandom)
       m_pushValues.frame++;  // Increment frame counter for random number generation
 
-    const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-                                       .layout     = m_rtPipelineLayout,
-                                       .stageFlags = VK_SHADER_STAGE_ALL,
-                                       .size       = sizeof(shaderio::TutoPushConstant),
-                                       .pValues    = &m_pushValues};
-    vkCmdPushConstants2(cmd, &pushInfo);
+    vkCmdPushConstants(cmd, m_rtPipelineLayout, VK_SHADER_STAGE_ALL, 0,
+                       sizeof(shaderio::TutoPushConstant), &m_pushValues);
 
     // Execute the compute shader with ray queries
     const VkExtent2D& size = m_app->getViewportSize();
@@ -584,6 +563,7 @@ int main(int argc, char** argv)
               {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                  // Required by ray tracing pipeline
               {VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayqueryFeature},               // For ray queries in compute shaders
           },
+      .apiVersion = VK_API_VERSION_1_3,
   };
 
   if(!appInfo.headless)

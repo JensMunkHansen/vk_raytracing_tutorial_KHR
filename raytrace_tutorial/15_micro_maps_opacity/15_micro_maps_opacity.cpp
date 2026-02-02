@@ -365,6 +365,7 @@ int main(int argc, char** argv)
               {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                   // Required by ray tracing pipeline
               {VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME, &opacityMicromapFeature},  // For opacity micromaps
           },
+      .apiVersion = VK_API_VERSION_1_3,
   };
 
   if(!appInfo.headless)

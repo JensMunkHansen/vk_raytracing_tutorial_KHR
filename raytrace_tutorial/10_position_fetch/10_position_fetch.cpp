@@ -254,6 +254,7 @@ int main(int argc, char** argv)
               {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                  // Required by ray tracing pipeline
               {VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME, &positionFetchFeature},  // Position fetch extension
           },
+      .apiVersion = VK_API_VERSION_1_3,
   };
 
   if(!appInfo.headless)

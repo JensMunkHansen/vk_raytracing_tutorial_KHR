@@ -516,6 +516,7 @@ int main(int argc, char** argv)
               {VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME, &serFeature},  // For SER support
               {VK_KHR_SHADER_CLOCK_EXTENSION_NAME, &shaderClockFeature},           // For shader clock (heatmap)
           },
+      .apiVersion = VK_API_VERSION_1_3,
   };
 
   if(!appInfo.headless)

@@ -68,5 +68,14 @@ void createGltfSceneInfoBuffer(GltfSceneResource& sceneResource, nvvk::StagingUp
 // This is a utility function to convert a primitive mesh to a GltfMeshResource.
 void primitiveMeshToResource(GltfSceneResource& sceneResource, nvvk::StagingUploader& stagingUploader, const nvutils::PrimitiveMesh& primMesh);
 
+// This is a utility function to load a PLY file and add it to the scene resource.
+// Returns true if the PLY file was loaded successfully.
+// Optionally returns the bounding box of the loaded mesh via outBboxMin/outBboxMax.
+bool loadPlyMesh(GltfSceneResource&           sceneResource,
+                 nvvk::StagingUploader&       stagingUploader,
+                 const std::filesystem::path& filename,
+                 glm::vec3*                   outBboxMin = nullptr,
+                 glm::vec3*                   outBboxMax = nullptr);
+
 
 }  // namespace nvsamples

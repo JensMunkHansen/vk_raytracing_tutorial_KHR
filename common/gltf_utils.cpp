@@ -17,8 +17,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Include miniply first before any X11 headers (which define None macro)
+#include "miniply.h"
+
 #include "gltf_utils.hpp"
 
+#include <cfloat>
 #include <span>
 #include <algorithm>
 #include <functional>
@@ -351,4 +355,252 @@ void nvsamples::createGltfSceneInfoBuffer(GltfSceneResource& sceneResource, nvvk
   NVVK_DBG_NAME(sceneResource.bSceneInfo.buffer);
   NVVK_CHECK(stagingUploader.appendBuffer(sceneResource.bSceneInfo, 0,
                                           std::span<const shaderio::GltfSceneInfo>(&sceneResource.sceneInfo, 1)));
+}
+
+// This function loads a PLY file and adds it to the scene resource.
+// It uses the miniply library to parse the PLY file.
+bool nvsamples::loadPlyMesh(GltfSceneResource&           sceneResource,
+                            nvvk::StagingUploader&       stagingUploader,
+                            const std::filesystem::path& filename,
+                            glm::vec3*                   outBboxMin,
+                            glm::vec3*                   outBboxMax)
+{
+  SCOPED_TIMER(__FUNCTION__);
+
+  miniply::PLYReader reader(filename.string().c_str());
+  if(!reader.valid())
+  {
+    LOGE("Failed to open PLY file: %s\n", filename.string().c_str());
+    return false;
+  }
+
+  // Find vertex element
+  uint32_t vertexIdx = reader.find_element(miniply::kPLYVertexElement);
+  uint32_t faceIdx   = reader.find_element(miniply::kPLYFaceElement);
+
+  if(vertexIdx == miniply::kInvalidIndex)
+  {
+    LOGE("PLY file has no vertex element: %s\n", filename.string().c_str());
+    return false;
+  }
+  if(faceIdx == miniply::kInvalidIndex)
+  {
+    LOGE("PLY file has no face element: %s\n", filename.string().c_str());
+    return false;
+  }
+
+  // Storage for extracted data
+  std::vector<float>    positions;
+  std::vector<float>    normals;
+  std::vector<uint8_t>  colors;
+  std::vector<uint32_t> indices;
+  uint32_t              numVertices = 0;
+  bool                  hasNormals  = false;
+  bool                  hasColors   = false;
+
+  // Process elements
+  while(reader.has_element())
+  {
+    if(reader.element_is(miniply::kPLYVertexElement))
+    {
+      numVertices = reader.num_rows();
+      if(!reader.load_element())
+      {
+        LOGE("Failed to load vertex element from PLY file: %s\n", filename.string().c_str());
+        return false;
+      }
+
+      // Extract positions
+      uint32_t posIdx[3];
+      if(reader.find_pos(posIdx))
+      {
+        positions.resize(numVertices * 3);
+        reader.extract_properties(posIdx, 3, miniply::PLYPropertyType::Float, positions.data());
+      }
+      else
+      {
+        LOGE("PLY file has no position data: %s\n", filename.string().c_str());
+        return false;
+      }
+
+      // Extract normals (optional)
+      uint32_t normalIdx[3];
+      if(reader.find_normal(normalIdx))
+      {
+        normals.resize(numVertices * 3);
+        reader.extract_properties(normalIdx, 3, miniply::PLYPropertyType::Float, normals.data());
+        hasNormals = true;
+      }
+
+      // Extract vertex colors (optional) - look for red, green, blue properties
+      uint32_t colorIdx[3];
+      if(reader.find_color(colorIdx))
+      {
+        colors.resize(numVertices * 3);
+        reader.extract_properties(colorIdx, 3, miniply::PLYPropertyType::UChar, colors.data());
+        hasColors = true;
+      }
+    }
+    else if(reader.element_is(miniply::kPLYFaceElement))
+    {
+      if(!reader.load_element())
+      {
+        LOGE("Failed to load face element from PLY file: %s\n", filename.string().c_str());
+        return false;
+      }
+
+      // Extract face indices (triangulated)
+      uint32_t indicesIdx[1];
+      if(reader.find_indices(indicesIdx))
+      {
+        uint32_t numTriangles = reader.num_triangles(indicesIdx[0]);
+        if(numTriangles == 0)
+        {
+          LOGE("PLY file has no triangles: %s\n", filename.string().c_str());
+          return false;
+        }
+
+        indices.resize(numTriangles * 3);
+        reader.extract_triangles(indicesIdx[0], positions.data(), numVertices, miniply::PLYPropertyType::UInt,
+                                 indices.data());
+      }
+      else
+      {
+        LOGE("PLY file has no face indices: %s\n", filename.string().c_str());
+        return false;
+      }
+    }
+
+    reader.next_element();
+  }
+
+  // If no normals, generate flat normals
+  if(!hasNormals)
+  {
+    normals.resize(numVertices * 3, 0.0f);
+    // Compute normals from triangles
+    for(size_t i = 0; i < indices.size(); i += 3)
+    {
+      uint32_t  i0 = indices[i + 0];
+      uint32_t  i1 = indices[i + 1];
+      uint32_t  i2 = indices[i + 2];
+      glm::vec3 v0(positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2]);
+      glm::vec3 v1(positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2]);
+      glm::vec3 v2(positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2]);
+      glm::vec3 n = glm::normalize(glm::cross(v1 - v0, v2 - v0));
+      // Accumulate normals
+      for(int j = 0; j < 3; ++j)
+      {
+        normals[i0 * 3 + j] += n[j];
+        normals[i1 * 3 + j] += n[j];
+        normals[i2 * 3 + j] += n[j];
+      }
+    }
+    // Normalize
+    for(uint32_t i = 0; i < numVertices; ++i)
+    {
+      glm::vec3 n(normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2]);
+      n = glm::normalize(n);
+      normals[i * 3 + 0] = n.x;
+      normals[i * 3 + 1] = n.y;
+      normals[i * 3 + 2] = n.z;
+    }
+  }
+
+  // Create interleaved vertex buffer (position + normal + color)
+  struct PlyVertex
+  {
+    glm::vec3 pos;
+    glm::vec3 nrm;
+    glm::vec4 color;  // RGBA as float (0-1)
+  };
+
+  // Compute bounding box while building vertices
+  glm::vec3 bboxMin(FLT_MAX);
+  glm::vec3 bboxMax(-FLT_MAX);
+
+  std::vector<PlyVertex> vertices(numVertices);
+  for(uint32_t i = 0; i < numVertices; ++i)
+  {
+    vertices[i].pos = glm::vec3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+    vertices[i].nrm = glm::vec3(normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2]);
+
+    // Set vertex color (default white if no colors)
+    if(hasColors)
+    {
+      vertices[i].color = glm::vec4(colors[i * 3 + 0] / 255.0f, colors[i * 3 + 1] / 255.0f,
+                                    colors[i * 3 + 2] / 255.0f, 1.0f);
+    }
+    else
+    {
+      vertices[i].color = glm::vec4(1.0f);  // Default white
+    }
+
+    // Update bounding box
+    bboxMin = glm::min(bboxMin, vertices[i].pos);
+    bboxMax = glm::max(bboxMax, vertices[i].pos);
+  }
+
+  LOGI("PLY bounding box: min(%.3f, %.3f, %.3f) max(%.3f, %.3f, %.3f)\n", bboxMin.x, bboxMin.y, bboxMin.z, bboxMax.x,
+       bboxMax.y, bboxMax.z);
+
+  nvvk::ResourceAllocator* allocator = stagingUploader.getResourceAllocator();
+
+  // Calculate buffer sizes
+  size_t verticesSize = vertices.size() * sizeof(PlyVertex);
+  size_t indicesSize  = indices.size() * sizeof(uint32_t);
+
+  // Create buffer for the geometry data (vertices + indices)
+  nvvk::Buffer gltfData;
+  allocator->createBuffer(gltfData, verticesSize + indicesSize,
+                          VK_BUFFER_USAGE_2_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_2_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT
+                              | VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
+  uint32_t bufferIndex = static_cast<uint32_t>(sceneResource.bGltfDatas.size());
+  sceneResource.bGltfDatas.push_back(gltfData);
+
+  // Upload vertices first (at offset 0)
+  stagingUploader.appendBuffer(gltfData, 0, std::span(vertices));
+
+  // Upload indices after vertices
+  stagingUploader.appendBuffer(gltfData, verticesSize, std::span(indices));
+
+  // Set up the GltfMesh structure with proper BufferView offsets
+  shaderio::GltfMesh mesh;
+  mesh.triMesh.positions = {.offset     = 0,
+                            .count      = numVertices,
+                            .byteStride = sizeof(PlyVertex)};
+
+  mesh.triMesh.normals = {.offset     = offsetof(PlyVertex, nrm),
+                          .count      = numVertices,
+                          .byteStride = sizeof(PlyVertex)};
+
+  // Vertex colors
+  mesh.triMesh.colorVert = {.offset     = offsetof(PlyVertex, color),
+                            .count      = numVertices,
+                            .byteStride = sizeof(PlyVertex)};
+
+  // No texture coordinates from PLY (can be added later if needed)
+  mesh.triMesh.texCoords = {.offset = uint32_t(-1), .count = 0, .byteStride = 0};
+
+  mesh.triMesh.indices = {.offset     = static_cast<uint32_t>(verticesSize),
+                          .count      = static_cast<uint32_t>(indices.size()),
+                          .byteStride = sizeof(uint32_t)};
+
+  // Set the buffer address and index type
+  mesh.gltfBuffer = (uint8_t*)gltfData.address;
+  mesh.indexType  = VK_INDEX_TYPE_UINT32;
+  sceneResource.meshes.push_back(mesh);
+
+  // Update the mapping from mesh index to buffer index
+  sceneResource.meshToBufferIndex.push_back(bufferIndex);
+
+  // Output bounding box if requested
+  if(outBboxMin)
+    *outBboxMin = bboxMin;
+  if(outBboxMax)
+    *outBboxMax = bboxMax;
+
+  LOGI("Loaded PLY file: %s (%u vertices, %zu triangles)\n", filename.string().c_str(), numVertices, indices.size() / 3);
+
+  return true;
 }

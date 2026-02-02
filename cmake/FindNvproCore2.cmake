@@ -107,7 +107,30 @@ if(_Print_info)
 endif()
 
 if(NvproCore2_FOUND)
-    set(NvproCore2_FOUND TRUE)   
+    set(NvproCore2_FOUND TRUE)
+
+    # On Debian/Ubuntu, Vulkan SDK components are in separate packages.
+    # Find them before nvpro_core2 setup so targets are available.
+
+    # VulkanUtilityLibraries provides vk_enum_string_helper.h
+    find_package(VulkanUtilityLibraries QUIET)
+    if(VulkanUtilityLibraries_FOUND)
+        message(STATUS "Found VulkanUtilityLibraries (system package)")
+    endif()
+
+    # shaderc: Debian package is 'shaderc', not 'shaderc_shared'
+    if(NOT TARGET shaderc_shared)
+        find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc)
+        find_path(SHADERC_INCLUDE_DIR shaderc/shaderc.hpp)
+        if(SHADERC_LIBRARY AND SHADERC_INCLUDE_DIR)
+            add_library(shaderc_shared SHARED IMPORTED)
+            set_target_properties(shaderc_shared PROPERTIES
+                IMPORTED_LOCATION ${SHADERC_LIBRARY}
+                INTERFACE_INCLUDE_DIRECTORIES ${SHADERC_INCLUDE_DIR}
+            )
+            message(STATUS "Found shaderc: ${SHADERC_LIBRARY}")
+        endif()
+    endif()
 
     # Include the setup file which will add all the necessary libraries
     # and create the actual targets (nvpro2::nvvk etc)

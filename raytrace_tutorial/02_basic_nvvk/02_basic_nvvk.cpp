@@ -121,7 +121,7 @@ public:
         .physicalDevice   = app->getPhysicalDevice(),
         .device           = app->getDevice(),
         .instance         = app->getInstance(),
-        .vulkanApiVersion = VK_API_VERSION_1_4,
+        .vulkanApiVersion = VK_API_VERSION_1_3,
     };
     m_allocator.init(allocatorInfo);
 
@@ -639,14 +639,6 @@ public:
         .sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
         .metallicRoughnessOverride = m_metallicRoughnessOverride,  // Override the metallic and roughness values
     };
-    const VkPushConstantsInfo pushInfo{
-        .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-        .layout     = m_graphicPipelineLayout,
-        .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-        .offset     = 0,
-        .size       = sizeof(shaderio::TutoPushConstant),
-        .pValues    = &pushValues,  // Other values are passed later
-    };
 
     // Rendering the Sky
     if(m_sceneResource.sceneInfo.useSky)
@@ -686,13 +678,8 @@ public:
 
 
     // Bind the descriptor sets for the graphics pipeline (making textures available to the shaders)
-    const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{.sType      = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-                                                          .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
-                                                          .layout     = m_graphicPipelineLayout,
-                                                          .firstSet   = 0,
-                                                          .descriptorSetCount = 1,
-                                                          .pDescriptorSets    = m_descPack.getSetPtr()};
-    vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicPipelineLayout, 0, 1,
+                            m_descPack.getSetPtr(), 0, nullptr);
 
 
     // ** BEGIN RENDERING **
@@ -722,7 +709,8 @@ public:
       // Push constant is information that is passed to the shader at each draw call.
       pushValues.normalMatrix  = glm::transpose(glm::inverse(glm::mat3(m_sceneResource.instances[i].transform)));
       pushValues.instanceIndex = int(i);  // The index of the instance in the m_instances vector
-      vkCmdPushConstants2(cmd, &pushInfo);
+      vkCmdPushConstants(cmd, m_graphicPipelineLayout, VK_SHADER_STAGE_ALL_GRAPHICS, 0,
+                         sizeof(shaderio::TutoPushConstant), &pushValues);
 
       // Get the buffer directly using the pre-computed mapping
       uint32_t            bufferIndex = m_sceneResource.meshToBufferIndex[meshIndex];
@@ -974,13 +962,8 @@ public:
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
 
     // Bind the descriptor sets for the graphics pipeline (making textures available to the shaders)
-    const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{.sType      = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-                                                          .stageFlags = VK_SHADER_STAGE_ALL,
-                                                          .layout     = m_rtPipelineLayout,
-                                                          .firstSet   = 0,
-                                                          .descriptorSetCount = 1,
-                                                          .pDescriptorSets    = m_descPack.getSetPtr()};
-    vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipelineLayout, 0, 1,
+                            m_descPack.getSetPtr(), 0, nullptr);
 
     // Push descriptor sets for ray tracing
     nvvk::WriteSetContainer write{};
@@ -994,12 +977,8 @@ public:
         .sceneInfoAddress          = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
         .metallicRoughnessOverride = m_metallicRoughnessOverride,
     };
-    const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-                                       .layout     = m_rtPipelineLayout,
-                                       .stageFlags = VK_SHADER_STAGE_ALL,
-                                       .size       = sizeof(shaderio::TutoPushConstant),
-                                       .pValues    = &pushValues};
-    vkCmdPushConstants2(cmd, &pushInfo);
+    vkCmdPushConstants(cmd, m_rtPipelineLayout, VK_SHADER_STAGE_ALL, 0,
+                       sizeof(shaderio::TutoPushConstant), &pushValues);
 
     // Ray trace
     const nvvk::SBTGenerator::Regions& regions = m_sbtGenerator.getSBTRegions();
@@ -1089,6 +1068,7 @@ int main(int argc, char** argv)
               {VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature},  // Use vkCmdTraceRaysKHR
               {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                  // Required by ray tracing pipeline
           },
+      .apiVersion = VK_API_VERSION_1_3,
   };
   if(!appInfo.headless)
   {

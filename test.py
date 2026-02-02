@@ -25,6 +25,7 @@ EXECUTABLES = [
     ("16_ray_query", ["--headless"]),
     ("17_ray_query_screenspace", ["--headless"]),
     ("18_swept_spheres", ["--headless"]),
+    ("19_failed_sss", ["--headless"]),
 ]
 
 def run_executable(executable_path, args):

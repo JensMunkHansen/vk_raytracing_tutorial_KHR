@@ -484,13 +484,8 @@ public:
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
 
     // Bind the descriptor sets for the graphics pipeline (making textures available to the shaders)
-    const VkBindDescriptorSetsInfo bindDescriptorSetsInfo{.sType      = VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO,
-                                                          .stageFlags = VK_SHADER_STAGE_ALL,
-                                                          .layout     = m_rtPipelineLayout,
-                                                          .firstSet   = 0,
-                                                          .descriptorSetCount = 1,
-                                                          .pDescriptorSets    = m_descPack.getSetPtr()};
-    vkCmdBindDescriptorSets2(cmd, &bindDescriptorSetsInfo);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipelineLayout, 0, 1,
+                            m_descPack.getSetPtr(), 0, nullptr);
 
     // Push descriptor sets for ray tracing (use motion blur TLAS)
     nvvk::WriteSetContainer write{};
@@ -504,12 +499,8 @@ public:
     m_pushValues.metallicRoughnessOverride = m_metallicRoughnessOverride;
     m_pushValues.numSamples                = m_numSamples;
 
-    const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-                                       .layout     = m_rtPipelineLayout,
-                                       .stageFlags = VK_SHADER_STAGE_ALL,
-                                       .size       = sizeof(shaderio::TutoPushConstant),
-                                       .pValues    = &m_pushValues};
-    vkCmdPushConstants2(cmd, &pushInfo);
+    vkCmdPushConstants(cmd, m_rtPipelineLayout, VK_SHADER_STAGE_ALL, 0,
+                       sizeof(shaderio::TutoPushConstant), &m_pushValues);
 
     // Ray trace
     const nvvk::SBTGenerator::Regions& regions = m_sbtGenerator.getSBTRegions();
@@ -555,6 +546,7 @@ int main(int argc, char** argv)
               {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                  // Required by ray tracing pipeline
               {VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME, &rtMotionBlurFeatures},  // Required for motion blur
           },
+      .apiVersion = VK_API_VERSION_1_3,
   };
 
   if(!appInfo.headless)
