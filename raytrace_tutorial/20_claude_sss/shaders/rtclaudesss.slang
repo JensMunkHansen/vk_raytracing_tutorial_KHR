@@ -123,10 +123,14 @@ float3 randomWalkSSS(float3 entryPos, float3 entryNormal, float3 albedo, float s
 
     // Russian roulette termination
     float survivalProb = max(throughput.x, max(throughput.y, throughput.z));
-    if(randomFloat(seed) > survivalProb)
+    if(survivalProb < 0.001 || randomFloat(seed) > survivalProb)
       break;
     throughput /= survivalProb;
   }
+
+  // Guard against NaN/INF from floating-point edge cases (denormal handling varies by driver)
+  if(any(isnan(result)) || any(isinf(result)))
+    result = float3(0.0, 0.0, 0.0);
 
   return result;
 }
